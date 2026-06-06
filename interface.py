@@ -6,11 +6,12 @@ import torch
 import streamlit as st
 import SessionState
 
-from models import parse_gan_type
 from utils import to_tensor
 from utils import postprocess
 from utils import load_generator
 from utils import factorize_weight
+from utils import get_gan_type
+from psp_sefa_adapter import PSP_MODEL_NAME
 
 
 @st.cache_resource(show_spinner=False)
@@ -35,7 +36,7 @@ def sample(model, gan_type, num=1):
         codes = model.truncation(codes,
                                  trunc_psi=0.7,
                                  trunc_layers=8)
-    elif gan_type == 'stylegan2':
+    elif gan_type in ['stylegan2', 'psp_stylegan2']:
         codes = model.mapping(codes)['w']
         codes = model.truncation(codes,
                                  trunc_psi=0.5,
@@ -49,25 +50,33 @@ def synthesize(_model, gan_type, code):
     """Synthesizes an image with the give code."""
     if gan_type == 'pggan':
         image = _model(to_tensor(code))['image']
-    elif gan_type in ['stylegan', 'stylegan2']:
+    elif gan_type in ['stylegan', 'stylegan2', 'psp_stylegan2']:
         image = _model.synthesis(to_tensor(code))['image']
     image = postprocess(image)[0]
     return image
+
+
+def reset_semantic_sliders(model_name, layer_idx, num_semantics):
+    """Resets all visible semantic sliders back to zero."""
+    for sem_idx in range(num_semantics):
+        st.session_state.pop(f'semantic_{model_name}_{layer_idx}_{sem_idx}', None)
 
 
 def main():
     """Main function (loop for StreamLit)."""
     st.title('Closed-Form Factorization of Latent Semantics in GANs')
     st.sidebar.title('Options')
-    reset = st.sidebar.button('Reset')
-
     model_name = st.sidebar.selectbox(
         'Model to Interpret',
-        ['stylegan_animeface512', 'stylegan_car512', 'stylegan_cat256',
+        [PSP_MODEL_NAME,
+         'stylegan_animeface512', 'stylegan_car512', 'stylegan_cat256',
          'pggan_celebahq1024'])
 
     model = get_model(model_name)
-    gan_type = parse_gan_type(model)
+    if model_name == PSP_MODEL_NAME:
+        gan_type = 'psp_stylegan2'
+    else:
+        gan_type = get_gan_type(model)
     layer_idx = st.sidebar.selectbox(
         'Layers to Interpret',
         ['all', '0-1', '2-5', '6-13'])
@@ -75,21 +84,28 @@ def main():
 
     num_semantics = st.sidebar.number_input(
         'Number of semantics', value=10, min_value=0, max_value=None, step=1)
+    st.sidebar.button(
+        'Reset',
+        on_click=reset_semantic_sliders,
+        args=(model_name, layer_idx, num_semantics))
+
     steps = {sem_idx: 0 for sem_idx in range(num_semantics)}
     if gan_type == 'pggan':
         max_step = 5.0
     elif gan_type == 'stylegan':
         max_step = 2.0
-    elif gan_type == 'stylegan2':
+    elif gan_type in ['stylegan2', 'psp_stylegan2']:
         max_step = 15.0
     for sem_idx in steps:
         eigen_value = eigen_values[sem_idx]
+        slider_key = f'semantic_{model_name}_{layer_idx}_{sem_idx}'
         steps[sem_idx] = st.sidebar.slider(
             f'Semantic {sem_idx:03d} (eigen value: {eigen_value:.3f})',
-            value=0.0,
             min_value=-max_step,
             max_value=max_step,
-            step=0.04 * max_step if not reset else 0.0)
+            step=0.04 * max_step,
+            value=0.0,
+            key=slider_key)
 
     image_placeholder = st.empty()
     button_placeholder = st.empty()
@@ -118,8 +134,9 @@ def main():
     for sem_idx, step in steps.items():
         if gan_type == 'pggan':
             code += boundaries[sem_idx:sem_idx + 1] * step
-        elif gan_type in ['stylegan', 'stylegan2']:
-            code[:, layers, :] += boundaries[sem_idx:sem_idx + 1] * step
+        elif gan_type in ['stylegan', 'stylegan2', 'psp_stylegan2']:
+            valid_layers = [layer for layer in layers if layer < code.shape[1]]
+            code[:, valid_layers, :] += boundaries[sem_idx:sem_idx + 1] * step
     image = synthesize(model, gan_type, code)
     image_placeholder.image(image / 255.0)
 

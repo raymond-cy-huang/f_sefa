@@ -15,6 +15,9 @@ import torch.nn.functional as F
 
 __all__ = ['PGGANGenerator']
 
+# Decoder path summary:
+# latent z -> progressively upsampled convolution blocks -> RGB image tensor.
+
 # Resolutions allowed.
 _RESOLUTIONS_ALLOWED = [8, 16, 32, 64, 128, 256, 512, 1024]
 

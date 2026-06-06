@@ -11,11 +11,31 @@ import torch
 from models import MODEL_ZOO
 from models import build_generator
 from models import parse_gan_type
+from psp_sefa_adapter import PSpSefaGenerator
+from psp_sefa_adapter import is_psp_model
 
 __all__ = ['postprocess', 'load_generator', 'factorize_weight',
            'HtmlPageVisualizer']
 
 CHECKPOINT_DIR = 'checkpoints'
+
+
+def get_gan_type(generator):
+    """Returns GAN type, with fallbacks for Streamlit hot-reload cache objects."""
+    if (getattr(generator, 'is_psp_sefa_generator', False) or
+            type(generator).__name__ == 'PSpSefaGenerator'):
+        return 'psp_stylegan2'
+    try:
+        return parse_gan_type(generator)
+    except ValueError:
+        class_name = type(generator).__name__.lower()
+        if 'pggan' in class_name:
+            return 'pggan'
+        if 'stylegan2' in class_name:
+            return 'stylegan2'
+        if 'stylegan' in class_name:
+            return 'stylegan'
+        raise
 
 
 def to_tensor(array):
@@ -63,6 +83,13 @@ def load_generator(model_name):
     Raises:
         KeyError: If the input `model_name` is not in `models.MODEL_ZOO`.
     """
+    if is_psp_model(model_name):
+        print(f'Building pSp decoder adapter for model `{model_name}` ...')
+        generator = PSpSefaGenerator().cuda()
+        generator.eval()
+        print(f'Finish loading pSp decoder adapter.')
+        return generator
+
     if model_name not in MODEL_ZOO:
         raise KeyError(f'Unknown model name `{model_name}`!')
 
@@ -163,12 +190,12 @@ def factorize_weight(generator, layer_idx='all'):
         ValueError: If the generator type is not supported.
     """
     # Get GAN type.
-    gan_type = parse_gan_type(generator)
+    gan_type = get_gan_type(generator)
 
     # Get layers.
     if gan_type == 'pggan':
         layers = [0]
-    elif gan_type in ['stylegan', 'stylegan2']:
+    elif gan_type in ['stylegan', 'stylegan2', 'psp_stylegan2']:
         if layer_idx == 'all':
             layers = list(range(generator.num_layers))
         else:
@@ -187,6 +214,8 @@ def factorize_weight(generator, layer_idx='all'):
             weight = weight.flip(2, 3).permute(1, 0, 2, 3).flatten(1)
         elif gan_type in ['stylegan', 'stylegan2']:
             weight = generator.synthesis.__getattr__(layer_name).style.weight.T
+        elif gan_type == 'psp_stylegan2':
+            weight = generator.sefa_weights(layers)[layers.index(idx)]
         weights.append(weight.cpu().detach().numpy())
     weight = np.concatenate(weights, axis=1).astype(np.float32)
     weight = weight / np.linalg.norm(weight, axis=0, keepdims=True)

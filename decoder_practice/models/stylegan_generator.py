@@ -16,6 +16,9 @@ from .sync_op import all_gather
 
 __all__ = ['StyleGANGenerator']
 
+# Decoder path summary:
+# W/W+ latent -> style modulation at each synthesis block -> RGB image tensor.
+
 # Resolutions allowed.
 _RESOLUTIONS_ALLOWED = [8, 16, 32, 64, 128, 256, 512, 1024]
 
