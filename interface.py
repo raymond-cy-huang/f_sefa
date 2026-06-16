@@ -11,6 +11,8 @@ from utils import postprocess
 from utils import load_generator
 from utils import factorize_weight
 from utils import get_gan_type
+from utils import get_torch_device
+from psp_sefa_adapter import E4E_MODEL_NAME
 from psp_sefa_adapter import PSP_MODEL_NAME
 
 
@@ -28,7 +30,7 @@ def factorize_model(_model, layer_idx):
 
 def sample(model, gan_type, num=1):
     """Samples latent codes."""
-    codes = torch.randn(num, model.z_space_dim).cuda()
+    codes = torch.randn(num, model.z_space_dim, device=get_torch_device())
     if gan_type == 'pggan':
         codes = model.layer0.pixel_norm(codes)
     elif gan_type == 'stylegan':
@@ -68,15 +70,12 @@ def main():
     st.sidebar.title('Options')
     model_name = st.sidebar.selectbox(
         'Model to Interpret',
-        [PSP_MODEL_NAME,
+        [E4E_MODEL_NAME, PSP_MODEL_NAME,
          'stylegan_animeface512', 'stylegan_car512', 'stylegan_cat256',
          'pggan_celebahq1024'])
 
     model = get_model(model_name)
-    if model_name == PSP_MODEL_NAME:
-        gan_type = 'psp_stylegan2'
-    else:
-        gan_type = get_gan_type(model)
+    gan_type = get_gan_type(model)
     layer_idx = st.sidebar.selectbox(
         'Layers to Interpret',
         ['all', '0-1', '2-5', '6-13'])

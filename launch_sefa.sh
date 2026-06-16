@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONDA_HOME="${CONDA_HOME:-$HOME/miniconda3}"
-CONDA_ENV="${CONDA_ENV:-gans_what}"
+CONDA_ENV="${CONDA_ENV:-sefa}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${1:-${PORT:-8501}}"
 

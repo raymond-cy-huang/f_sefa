@@ -101,3 +101,91 @@ def inverse_map(high_dim, matrix, method, ridge_lambda=1e-6, cg_tol=1e-10, cg_ma
         raise ValueError(f"Unsupported inverse method `{method}`.")
 
     return _restore_shape(solution, high_dim, latent_dim)
+
+
+def solve_linear_system(matrix, rhs, method, ridge_lambda=1e-6, cg_tol=1e-10, cg_maxiter=None):
+    """Solves matrix @ x ~= rhs with the requested inverse method."""
+
+    matrix = np.asarray(matrix, dtype=np.float64)
+    rhs = np.asarray(rhs, dtype=np.float64)
+    method = method.lower()
+
+    if method == "svd_pinv":
+        return np.linalg.pinv(matrix) @ rhs
+    if method == "ridge":
+        gram = matrix.T @ matrix
+        return np.linalg.solve(gram + ridge_lambda * np.eye(matrix.shape[1]), matrix.T @ rhs)
+    if method == "qr_lstsq":
+        q, r = np.linalg.qr(matrix, mode="reduced")
+        return np.linalg.solve(r, q.T @ rhs)
+    if method == "lstsq":
+        solution, _, _, _ = np.linalg.lstsq(matrix, rhs, rcond=None)
+        return solution
+    if method == "cg":
+        gram = matrix.T @ matrix
+        right = matrix.T @ rhs
+        if scipy_cg is not None:
+            try:
+                solution, info = scipy_cg(gram, right, rtol=cg_tol, atol=0.0, maxiter=cg_maxiter)
+            except TypeError:
+                solution, info = scipy_cg(gram, right, tol=cg_tol, maxiter=cg_maxiter)
+        else:
+            solution, info = _numpy_cg(gram, right, cg_tol, cg_maxiter)
+        if info != 0:
+            raise RuntimeError(f"CG did not converge; info={info}.")
+        return solution
+    raise ValueError(f"Unsupported inverse method `{method}`.")
+
+
+def inverse_nonlinear_features(
+    high_dim,
+    feature_fn,
+    jacobian_diag_fn,
+    method,
+    initial=None,
+    num_iterations=20,
+    ridge_lambda=1e-6,
+    cg_tol=1e-10,
+    cg_maxiter=None,
+    step_clip=1.0,
+):
+    """Inverts nonlinear coordinate-wise basis features by Gauss-Newton.
+
+    Each coordinate z_i is solved independently from its feature vector
+    [phi_0(z_i), phi_1(z_i), ...]. The requested inverse method is used to
+    solve the one-column linear least-squares update at every iteration.
+    """
+
+    high_dim = np.asarray(high_dim, dtype=np.float64)
+    target_shape = high_dim.shape[:-1]
+    num_features = high_dim.shape[-1]
+    flat_target = high_dim.reshape(-1, num_features)
+    if initial is None:
+        current = np.zeros(flat_target.shape[0], dtype=np.float64)
+    else:
+        current = np.asarray(initial, dtype=np.float64).reshape(-1).copy()
+
+    for _ in range(num_iterations):
+        feature = feature_fn(current).reshape(-1, num_features)
+        jac_diag = jacobian_diag_fn(current).reshape(-1, num_features)
+        residual = flat_target - feature
+        max_update = 0.0
+        for idx in range(flat_target.shape[0]):
+            jac = jac_diag[idx][:, None]
+            delta = solve_linear_system(
+                jac,
+                residual[idx],
+                method,
+                ridge_lambda=ridge_lambda,
+                cg_tol=cg_tol,
+                cg_maxiter=cg_maxiter,
+            )
+            update = float(delta.reshape(-1)[0])
+            if step_clip is not None:
+                update = float(np.clip(update, -step_clip, step_clip))
+            current[idx] += update
+            max_update = max(max_update, abs(update))
+        if max_update < 1e-12:
+            break
+
+    return current.reshape(target_shape)

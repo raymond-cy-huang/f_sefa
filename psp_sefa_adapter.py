@@ -1,4 +1,4 @@
-"""Adapter for manipulating pSp / rosinality StyleGAN2 latents in SeFa UI."""
+"""Adapter for manipulating encoder / rosinality StyleGAN2 latents in SeFa."""
 
 import sys
 from pathlib import Path
@@ -8,17 +8,26 @@ import torch.nn as nn
 
 
 PSP_MODEL_NAME = 'psp_lenna_ffhq1024'
+E4E_MODEL_NAME = 'e4e_ffhq_encode'
 PSP_REPO_DIR = Path(__file__).resolve().parents[1] / 'pixel2style2pixel'
 PSP_CHECKPOINT = PSP_REPO_DIR / 'pretrained_models' / 'psp_ffhq_encode.pt'
+E4E_CHECKPOINT = Path(__file__).resolve().parent / 'checkpoints' / 'e4e_ffhq_encode.pth'
+
+ENCODER_MODEL_CONFIGS = {
+    PSP_MODEL_NAME: PSP_CHECKPOINT,
+    E4E_MODEL_NAME: E4E_CHECKPOINT,
+}
 
 
-class PSpSefaGenerator(nn.Module):
-    """Wraps pSp's StyleGAN2 decoder with the methods SeFa UI expects."""
+class EncoderSefaGenerator(nn.Module):
+    """Wraps a pSp/e4e StyleGAN2 decoder with the methods SeFa expects."""
 
-    def __init__(self, checkpoint_path=PSP_CHECKPOINT):
+    def __init__(self, checkpoint_path=PSP_CHECKPOINT, model_name=PSP_MODEL_NAME):
         super().__init__()
         self.is_psp_sefa_generator = True
+        self.model_name = model_name
         self.z_space_dim = 512
+        self.w_space_dim = 512
         self.num_layers = 18
         self.checkpoint_path = str(checkpoint_path)
 
@@ -26,11 +35,15 @@ class PSpSefaGenerator(nn.Module):
 
         self.decoder = Generator(1024, 512, 8)
         checkpoint = torch.load(self.checkpoint_path, map_location='cpu')
+        if 'state_dict' not in checkpoint:
+            raise KeyError(f'Checkpoint `{self.checkpoint_path}` has no `state_dict`.')
         state_dict = {
             key[len('decoder.') :]: value
             for key, value in checkpoint['state_dict'].items()
             if key.startswith('decoder.')
         }
+        if not state_dict:
+            raise KeyError(f'Checkpoint `{self.checkpoint_path}` has no decoder weights.')
         self.decoder.load_state_dict(state_dict, strict=True)
 
     def synthesis(self, code):
@@ -92,4 +105,14 @@ class PSpSefaGenerator(nn.Module):
 
 def is_psp_model(model_name):
     """Checks whether a model name is handled by this adapter."""
-    return model_name == PSP_MODEL_NAME
+    return model_name in ENCODER_MODEL_CONFIGS
+
+
+def build_encoder_sefa_generator(model_name):
+    """Builds the registered encoder-decoder adapter for SeFa."""
+    if model_name not in ENCODER_MODEL_CONFIGS:
+        raise KeyError(f'Unknown encoder model `{model_name}`.')
+    return EncoderSefaGenerator(ENCODER_MODEL_CONFIGS[model_name], model_name)
+
+
+PSpSefaGenerator = EncoderSefaGenerator

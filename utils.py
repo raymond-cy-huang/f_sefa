@@ -3,21 +3,30 @@
 import base64
 import os
 import subprocess
-import cv2
 import numpy as np
 
 import torch
 
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
 from models import MODEL_ZOO
 from models import build_generator
 from models import parse_gan_type
-from psp_sefa_adapter import PSpSefaGenerator
+from psp_sefa_adapter import build_encoder_sefa_generator
 from psp_sefa_adapter import is_psp_model
 
 __all__ = ['postprocess', 'load_generator', 'factorize_weight',
            'HtmlPageVisualizer']
 
 CHECKPOINT_DIR = 'checkpoints'
+
+
+def get_torch_device():
+    """Returns the default torch device for this runtime."""
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def get_gan_type(generator):
@@ -45,10 +54,10 @@ def to_tensor(array):
       array: The input array to convert.
 
     Returns:
-      A `torch.Tensor` with dtype `torch.FloatTensor` on cuda device.
+      A `torch.Tensor` with dtype `torch.FloatTensor` on the active device.
     """
     assert isinstance(array, np.ndarray)
-    return torch.from_numpy(array).type(torch.FloatTensor).cuda()
+    return torch.from_numpy(array).type(torch.FloatTensor).to(get_torch_device())
 
 
 def postprocess(images, min_val=-1.0, max_val=1.0):
@@ -84,10 +93,10 @@ def load_generator(model_name):
         KeyError: If the input `model_name` is not in `models.MODEL_ZOO`.
     """
     if is_psp_model(model_name):
-        print(f'Building pSp decoder adapter for model `{model_name}` ...')
-        generator = PSpSefaGenerator().cuda()
+        print(f'Building encoder decoder adapter for model `{model_name}` ...')
+        generator = build_encoder_sefa_generator(model_name).to(get_torch_device())
         generator.eval()
-        print(f'Finish loading pSp decoder adapter.')
+        print(f'Finish loading encoder decoder adapter.')
         return generator
 
     if model_name not in MODEL_ZOO:
@@ -116,7 +125,7 @@ def load_generator(model_name):
         generator.load_state_dict(checkpoint['generator'])
     else:
         generator.load_state_dict(checkpoint)
-    generator = generator.cuda()
+    generator = generator.to(get_torch_device())
     generator.eval()
     print(f'Finish loading checkpoint.')
     return generator
@@ -372,6 +381,8 @@ def encode_image_to_html_str(image, image_size=None):
     """
     if image is None:
         return ''
+    if cv2 is None:
+        raise ImportError('`cv2` is required to encode images into HTML strings.')
 
     assert image.ndim == 3 and image.shape[2] in [1, 3]
 

@@ -97,3 +97,73 @@ def map_latent_slices(latent, matrix):
     flat = latent.reshape(-1, latent.shape[-1]).T
     mapped = matrix @ flat
     return mapped.T.reshape(latent.shape[:-1] + (matrix.shape[0],))
+
+
+def _scale_latent(latent, scale):
+    return np.asarray(latent, dtype=np.float64) / float(scale)
+
+
+def _poly_feature_and_derivative(name, x, degree):
+    values = []
+    derivatives = []
+    for order in range(degree + 1):
+        coeff = np.zeros(order + 1, dtype=np.float64)
+        coeff[order] = 1.0
+        if name == "legendre":
+            values.append(legendre.legval(x, coeff))
+            derivatives.append(legendre.legval(x, legendre.legder(coeff)))
+        elif name == "chebyshev":
+            values.append(chebyshev.chebval(x, coeff))
+            derivatives.append(chebyshev.chebval(x, chebyshev.chebder(coeff)))
+        elif name == "hermite":
+            values.append(hermite.hermval(x, coeff))
+            derivatives.append(hermite.hermval(x, hermite.hermder(coeff)))
+        elif name == "laguerre":
+            values.append(laguerre.lagval(x, coeff))
+            derivatives.append(laguerre.lagval(x, laguerre.lagder(coeff)))
+        else:
+            raise ValueError(f"Unsupported polynomial basis `{name}`.")
+    return np.stack(values, axis=-1), np.stack(derivatives, axis=-1)
+
+
+def nonlinear_feature_map(latent, name, degree, input_scale=4.0):
+    """Maps z_i to explicit nonlinear basis features.
+
+    For polynomial bases this returns [phi_0(x_i), ..., phi_degree(x_i)] for
+    each latent coordinate x_i = z_i / input_scale. For Fourier it returns
+    [1, sin(pi*x_i), cos(pi*x_i), ...]. This is nonlinear in z and is the
+    finite sampled function-space feature map used by the round-trip script.
+    """
+
+    name = name.lower()
+    x = _scale_latent(latent, input_scale)
+    if name == "fourier":
+        values = [np.ones_like(x)]
+        for order in range(1, degree + 1):
+            values.append(np.sin(np.pi * order * x))
+            values.append(np.cos(np.pi * order * x))
+        return np.stack(values, axis=-1)
+
+    if name == "laguerre":
+        x = x + 2.0
+    values, _ = _poly_feature_and_derivative(name, x, degree)
+    return values
+
+
+def nonlinear_feature_jacobian_diag(latent, name, degree, input_scale=4.0):
+    """Returns d feature_i,k / d latent_i for the nonlinear feature map."""
+
+    name = name.lower()
+    scale = float(input_scale)
+    x = _scale_latent(latent, scale)
+    if name == "fourier":
+        derivatives = [np.zeros_like(x)]
+        for order in range(1, degree + 1):
+            derivatives.append((np.pi * order / scale) * np.cos(np.pi * order * x))
+            derivatives.append(-(np.pi * order / scale) * np.sin(np.pi * order * x))
+        return np.stack(derivatives, axis=-1)
+
+    if name == "laguerre":
+        x = x + 2.0
+    _, derivatives = _poly_feature_and_derivative(name, x, degree)
+    return derivatives / scale

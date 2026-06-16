@@ -23,7 +23,7 @@ from PIL import Image
 import torch
 
 from explicit_sefa_mapping import extract_sefa_directions
-from models import parse_gan_type
+from utils import get_gan_type
 from utils import load_generator
 from utils import parse_indices
 
@@ -74,6 +74,10 @@ def collect_stylegan_affine_weight(generator, layer_idx):
     """Collects real StyleGAN affine weights into W with shape [out, w_dim]."""
 
     layers = parse_indices(layer_idx, min_val=0, max_val=generator.num_layers - 1)
+    if hasattr(generator, "sefa_weights"):
+        weights = [weight.T.detach() for weight in generator.sefa_weights(layers)]
+        return layers, torch.cat(weights, dim=0)
+
     weights = []
     for idx in layers:
         layer = generator.synthesis.__getattr__(f"layer{idx}")
@@ -144,8 +148,8 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     generator = load_generator(args.model)
-    gan_type = parse_gan_type(generator)
-    if gan_type not in ["stylegan", "stylegan2"]:
+    gan_type = get_gan_type(generator)
+    if gan_type not in ["stylegan", "stylegan2", "psp_stylegan2"]:
         raise ValueError("This validation script currently supports StyleGAN W+ latents.")
 
     latent_path = os.path.join(args.latent_dir, f"{args.model}_latents.npy")

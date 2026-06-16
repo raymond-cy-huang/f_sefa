@@ -10,7 +10,8 @@ import torch
 from explicit_sefa_mapping import extract_sefa_directions
 from explicit_sefa_mapping import generate_explicit_trajectory
 from explicit_sefa_mapping import generate_linear_trajectory
-from models import parse_gan_type
+from utils import get_gan_type
+from utils import get_torch_device
 from utils import load_generator
 from utils import parse_indices
 
@@ -32,6 +33,10 @@ def collect_stylegan_affine_weight(generator, layer_idx):
     """Collects real StyleGAN affine weights into one SeFa matrix W."""
 
     layers = parse_indices(layer_idx, min_val=0, max_val=generator.num_layers - 1)
+    if hasattr(generator, "sefa_weights"):
+        weights = [weight.T.detach() for weight in generator.sefa_weights(layers)]
+        return layers, torch.cat(weights, dim=0)
+
     weights = []
     for idx in layers:
         layer = generator.synthesis.__getattr__(f"layer{idx}")
@@ -59,8 +64,8 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     generator = load_generator(args.model)
-    gan_type = parse_gan_type(generator)
-    if gan_type not in ["stylegan", "stylegan2"]:
+    gan_type = get_gan_type(generator)
+    if gan_type not in ["stylegan", "stylegan2", "psp_stylegan2"]:
         raise ValueError("This blind-test script currently supports StyleGAN-style W+ latents.")
 
     latent_path = os.path.join(args.latent_dir, f"{args.model}_latents.npy")
@@ -68,7 +73,7 @@ def main():
     if args.index < 0 or args.index >= len(latents):
         raise IndexError(f"--index must be in [0, {len(latents) - 1}]")
 
-    w0 = torch.from_numpy(latents[args.index : args.index + 1]).float().cuda()
+    w0 = torch.from_numpy(latents[args.index : args.index + 1]).float().to(get_torch_device())
     layers, weight = collect_stylegan_affine_weight(generator, args.layer_idx)
     directions = extract_sefa_directions(weight, args.k)
 

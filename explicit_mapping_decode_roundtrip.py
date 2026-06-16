@@ -19,8 +19,8 @@ import numpy as np
 from PIL import Image
 import torch
 
-from models import parse_gan_type
 from utils import factorize_weight
+from utils import get_gan_type
 from utils import load_generator
 from utils import postprocess
 from utils import to_tensor
@@ -82,7 +82,7 @@ def decode_image(generator, gan_type, code):
     with torch.no_grad():
         if gan_type == "pggan":
             image = generator(to_tensor(code))["image"]
-        elif gan_type in ["stylegan", "stylegan2"]:
+        elif gan_type in ["stylegan", "stylegan2", "psp_stylegan2"]:
             image = generator.synthesis(to_tensor(code))["image"]
         else:
             raise ValueError(f"Unsupported GAN type: {gan_type}")
@@ -112,10 +112,10 @@ def main():
     w0 = code[0].astype(np.float64)
 
     generator = load_generator(args.model)
-    gan_type = parse_gan_type(generator)
+    gan_type = get_gan_type(generator)
     layers, n1, n2, eigen_values = sorted_sefa_directions(generator, args.layer_idx)
 
-    if gan_type not in ["stylegan", "stylegan2"]:
+    if gan_type not in ["stylegan", "stylegan2", "psp_stylegan2"]:
         raise ValueError("This round-trip script currently targets W+ StyleGAN latents.")
 
     direction1 = make_wplus_direction(n1, w0.shape, layers)

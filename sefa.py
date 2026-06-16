@@ -7,11 +7,12 @@ import numpy as np
 
 import torch
 
-from models import parse_gan_type
 from utils import to_tensor
 from utils import postprocess
 from utils import load_generator
 from utils import factorize_weight
+from utils import get_gan_type
+from utils import get_torch_device
 from utils import HtmlPageVisualizer
 
 
@@ -68,7 +69,7 @@ def main():
 
     # Factorize weights.
     generator = load_generator(args.model_name)
-    gan_type = parse_gan_type(generator)
+    gan_type = get_gan_type(generator)
     layers, boundaries, values = factorize_weight(generator, args.layer_idx)
 
     # Set random seed.
@@ -76,10 +77,10 @@ def main():
     torch.manual_seed(args.seed)
 
     # Prepare codes.
-    codes = torch.randn(args.num_samples, generator.z_space_dim).cuda()
+    codes = torch.randn(args.num_samples, generator.z_space_dim, device=get_torch_device())
     if gan_type == 'pggan':
         codes = generator.layer0.pixel_norm(codes)
-    elif gan_type in ['stylegan', 'stylegan2']:
+    elif gan_type in ['stylegan', 'stylegan2', 'psp_stylegan2']:
         codes = generator.mapping(codes)['w']
         codes = generator.truncation(codes,
                                      trunc_psi=args.trunc_psi,
@@ -126,7 +127,7 @@ def main():
                 if gan_type == 'pggan':
                     temp_code += boundary * d
                     image = generator(to_tensor(temp_code))['image']
-                elif gan_type in ['stylegan', 'stylegan2']:
+                elif gan_type in ['stylegan', 'stylegan2', 'psp_stylegan2']:
                     temp_code[:, layers, :] += boundary * d
                     image = generator.synthesis(to_tensor(temp_code))['image']
                 image = postprocess(image)[0]

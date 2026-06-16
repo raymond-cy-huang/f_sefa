@@ -2,7 +2,7 @@
 
 This experiment is not semantic editing. It only checks whether the path
 
-    latent code -> explicit orthogonal basis mapping -> inverse mapping -> latent code
+    latent code -> explicit nonlinear orthogonal basis mapping -> inverse mapping -> latent code
 
 can stay numerically and visually close after decoding with the existing SEFA
 generator interface. It does not train any model and does not change SEFA's
@@ -26,10 +26,10 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from experiment_utils.basis_mapping import available_basis_names
-from experiment_utils.basis_mapping import build_basis_matrix
-from experiment_utils.basis_mapping import map_latent_slices
+from experiment_utils.basis_mapping import nonlinear_feature_jacobian_diag
+from experiment_utils.basis_mapping import nonlinear_feature_map
 from experiment_utils.inverse_mapping import available_inverse_methods
-from experiment_utils.inverse_mapping import inverse_map
+from experiment_utils.inverse_mapping import inverse_nonlinear_features
 from experiment_utils.metrics import image_errors
 from experiment_utils.metrics import latent_errors
 from experiment_utils.metrics import make_comparison_grid
@@ -57,6 +57,8 @@ def parse_args():
     parser.add_argument("--ridge_lambda", type=float, default=1e-6)
     parser.add_argument("--cg_tol", type=float, default=1e-10)
     parser.add_argument("--cg_maxiter", type=int, default=None)
+    parser.add_argument("--inverse_iterations", type=int, default=20)
+    parser.add_argument("--basis_input_scale", type=float, default=4.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--gpu_id", default="0")
     parser.add_argument("--grid_thumb_size", type=int, default=160)
@@ -74,7 +76,7 @@ def prepare_random_latents(generator, gan_type, num_samples, args):
     z = torch.randn(num_samples, generator.z_space_dim, device=generator_device(generator))
     if gan_type == "pggan":
         return generator.layer0.pixel_norm(z).detach().cpu().numpy().astype(np.float32)
-    if gan_type in ["stylegan", "stylegan2"]:
+    if gan_type in ["stylegan", "stylegan2", "psp_stylegan2"]:
         w = generator.mapping(z)["w"]
         wp = generator.truncation(
             w,
@@ -96,7 +98,7 @@ def load_or_sample_latents(generator, gan_type, args):
         if latents.ndim == 1:
             latents = latents[None, :]
         elif (
-            gan_type in ["stylegan", "stylegan2"]
+            gan_type in ["stylegan", "stylegan2", "psp_stylegan2"]
             and latents.ndim == 2
             and latents.shape == (generator.num_layers, generator.w_space_dim)
         ):
@@ -112,7 +114,7 @@ def to_decoder_code(generator, gan_type, latent):
     latent = np.asarray(latent, dtype=np.float32)
     if gan_type == "pggan":
         return latent.reshape(1, -1)
-    if gan_type in ["stylegan", "stylegan2"]:
+    if gan_type in ["stylegan", "stylegan2", "psp_stylegan2"]:
         if latent.ndim == 1:
             latent = np.tile(latent[None, :], (generator.num_layers, 1))
         elif latent.ndim == 2 and latent.shape[0] == 1:
@@ -131,7 +133,7 @@ def decode_image(generator, gan_type, latent):
     with torch.no_grad():
         if gan_type == "pggan":
             image = generator(to_tensor(code))["image"]
-        elif gan_type in ["stylegan", "stylegan2"]:
+        elif gan_type in ["stylegan", "stylegan2", "psp_stylegan2"]:
             image = generator.synthesis(to_tensor(code))["image"]
         else:
             raise ValueError(f"Unsupported GAN type `{gan_type}`.")
@@ -154,6 +156,16 @@ def csv_fieldnames():
     ]
 
 
+def initial_guess_from_features(high_dim, basis_name, input_scale):
+    """Builds an inverse initial guess from high-dimensional features only."""
+
+    if basis_name.lower() != "fourier" or high_dim.shape[-1] < 3:
+        return None
+    sin_1 = high_dim[..., 1]
+    cos_1 = high_dim[..., 2]
+    return (np.arctan2(sin_1, cos_1) / np.pi) * float(input_scale)
+
+
 def main():
     args = parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
@@ -162,7 +174,7 @@ def main():
     global torch, parse_gan_type, load_generator, postprocess, to_tensor
     try:
         import torch as torch_module
-        from models import parse_gan_type as parse_gan_type_func
+        from utils import get_gan_type as parse_gan_type_func
         from utils import load_generator as load_generator_func
         from utils import postprocess as postprocess_func
         from utils import to_tensor as to_tensor_func
@@ -187,12 +199,6 @@ def main():
     if len(latents) == 0:
         raise ValueError("No latent codes are available for this experiment.")
 
-    latent_dim = int(latents.shape[-1])
-    mappings = {
-        name: build_basis_matrix(name, latent_dim=latent_dim, degree=args.degree)
-        for name in args.basis
-    }
-
     rows = []
     for sample_id, latent in enumerate(latents):
         sample_dir = os.path.join(args.output_dir, f"sample_{sample_id:03d}")
@@ -203,13 +209,37 @@ def main():
         save_image(original_image, original_path)
         grid_items = [("original", original_image)]
 
-        for basis_name, mapping in mappings.items():
-            high_dim = map_latent_slices(latent.astype(np.float64), mapping.matrix)
+        for basis_name in args.basis:
+            high_dim = nonlinear_feature_map(
+                latent.astype(np.float64),
+                basis_name,
+                args.degree,
+                input_scale=args.basis_input_scale,
+            )
             for inverse_method in args.inverse_methods:
-                recon_latent = inverse_map(
+                feature_fn = lambda x, basis_name=basis_name: nonlinear_feature_map(
+                    x,
+                    basis_name,
+                    args.degree,
+                    input_scale=args.basis_input_scale,
+                )
+                jacobian_fn = lambda x, basis_name=basis_name: nonlinear_feature_jacobian_diag(
+                    x,
+                    basis_name,
+                    args.degree,
+                    input_scale=args.basis_input_scale,
+                )
+                recon_latent = inverse_nonlinear_features(
                     high_dim,
-                    mapping.matrix,
+                    feature_fn,
+                    jacobian_fn,
                     inverse_method,
+                    initial=initial_guess_from_features(
+                        high_dim,
+                        basis_name,
+                        args.basis_input_scale,
+                    ),
+                    num_iterations=args.inverse_iterations,
                     ridge_lambda=args.ridge_lambda,
                     cg_tol=args.cg_tol,
                     cg_maxiter=args.cg_maxiter,
@@ -254,6 +284,8 @@ def main():
         "latent_source": latent_source,
         "num_samples": int(len(latents)),
         "degree": args.degree,
+        "basis_input_scale": args.basis_input_scale,
+        "inverse_iterations": args.inverse_iterations,
         "basis": args.basis,
         "inverse_methods": args.inverse_methods,
         "results": rows,
