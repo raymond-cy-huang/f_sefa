@@ -2,7 +2,10 @@
 
 import base64
 import os
+import pickle
 import subprocess
+import sys
+import types
 import numpy as np
 
 import torch
@@ -22,6 +25,26 @@ __all__ = ['postprocess', 'load_generator', 'factorize_weight',
            'HtmlPageVisualizer']
 
 CHECKPOINT_DIR = 'checkpoints'
+
+
+class _EasyDictStub(dict):
+    """Minimal dnnlib.EasyDict replacement for unpickling StyleGAN files."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name, value):
+        self[name] = value
+
+
+class _NetworkStub:
+    """Minimal dnnlib.tflib.Network replacement for extracting variables."""
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 
 def get_torch_device():
@@ -79,6 +102,104 @@ def postprocess(images, min_val=-1.0, max_val=1.0):
     return images
 
 
+def _install_stylegan_pickle_stubs():
+    """Installs temporary dnnlib stubs needed to unpickle NVLabs StyleGAN."""
+    old_modules = {
+        name: sys.modules.get(name)
+        for name in ['dnnlib', 'dnnlib.tflib', 'dnnlib.tflib.network']
+    }
+
+    dnnlib_module = types.ModuleType('dnnlib')
+    dnnlib_module.EasyDict = _EasyDictStub
+    tflib_module = types.ModuleType('dnnlib.tflib')
+    network_module = types.ModuleType('dnnlib.tflib.network')
+    network_module.Network = _NetworkStub
+    tflib_module.network = network_module
+    dnnlib_module.tflib = tflib_module
+
+    sys.modules['dnnlib'] = dnnlib_module
+    sys.modules['dnnlib.tflib'] = tflib_module
+    sys.modules['dnnlib.tflib.network'] = network_module
+    return old_modules
+
+
+def _restore_stylegan_pickle_stubs(old_modules):
+    """Restores dnnlib modules after unpickling."""
+    for name, module in old_modules.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+
+
+def _stylegan_tf_variables(network):
+    """Collects TensorFlow variables from a pickled StyleGAN network."""
+    variables = {}
+    for name, value in getattr(network, 'variables', []):
+        variables[name] = value
+
+    components = getattr(network, 'components', {})
+    if hasattr(components, 'items'):
+        for component_name, component in components.items():
+            for name, value in getattr(component, 'variables', []):
+                variables[f'{component_name}.{name}'] = value
+                variables.setdefault(name, value)
+    return variables
+
+
+def _convert_tf_array_to_pytorch(array, target_shape):
+    """Converts a TensorFlow variable array to the PyTorch tensor layout."""
+    array = np.asarray(array)
+    if array.shape == target_shape:
+        return array
+    if array.ndim == 2 and array.T.shape == target_shape:
+        return array.T
+    if array.ndim == 4:
+        transposed = array.transpose(3, 2, 0, 1)
+        if transposed.shape == target_shape:
+            return transposed
+    raise ValueError(f'Unable to convert shape {array.shape} to {target_shape}.')
+
+
+def _load_stylegan_pickle_state_dict(pickle_path, generator):
+    """Loads an NVLabs StyleGAN TensorFlow pickle into a PyTorch state dict."""
+    old_modules = _install_stylegan_pickle_stubs()
+    try:
+        with open(pickle_path, 'rb') as f:
+            network = pickle.load(f, encoding='latin1')
+    finally:
+        _restore_stylegan_pickle_stubs(old_modules)
+
+    if isinstance(network, tuple):
+        network = network[2] if len(network) >= 3 else network[-1]
+
+    tf_variables = _stylegan_tf_variables(network)
+    state_dict = {}
+    for pytorch_name, tensor in generator.state_dict().items():
+        tf_name = generator.pth_to_tf_var_mapping.get(pytorch_name)
+        if tf_name is None:
+            state_dict[pytorch_name] = tensor
+            continue
+
+        lookup_names = [tf_name]
+        if pytorch_name.startswith('mapping.'):
+            lookup_names.insert(0, f'mapping.{tf_name}')
+        elif pytorch_name.startswith('synthesis.'):
+            lookup_names.insert(0, f'synthesis.{tf_name}')
+
+        for lookup_name in lookup_names:
+            if lookup_name in tf_variables:
+                array = _convert_tf_array_to_pytorch(
+                    tf_variables[lookup_name], tuple(tensor.shape))
+                state_dict[pytorch_name] = torch.from_numpy(array).to(tensor)
+                break
+        else:
+            raise KeyError(
+                f'Cannot find TensorFlow variable `{tf_name}` for '
+                f'PyTorch tensor `{pytorch_name}`.')
+    return state_dict
+
+
 def load_generator(model_name):
     """Loads pre-trained generator.
 
@@ -113,11 +234,18 @@ def load_generator(model_name):
     # Load pre-trained weights.
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     checkpoint_path = os.path.join(CHECKPOINT_DIR, model_name + '.pth')
+    pickle_path = os.path.join(CHECKPOINT_DIR, model_name + '.pkl')
     print(f'Loading checkpoint from `{checkpoint_path}` ...')
     if not os.path.exists(checkpoint_path):
-        print(f'  Downloading checkpoint from `{url}` ...')
-        subprocess.call(['wget', '--quiet', '-O', checkpoint_path, url])
-        print(f'  Finish downloading checkpoint.')
+        if os.path.exists(pickle_path):
+            print(f'  Converting StyleGAN pickle from `{pickle_path}` ...')
+            checkpoint = _load_stylegan_pickle_state_dict(pickle_path, generator)
+            torch.save(checkpoint, checkpoint_path)
+            print(f'  Cached converted checkpoint to `{checkpoint_path}`.')
+        else:
+            print(f'  Downloading checkpoint from `{url}` ...')
+            subprocess.call(['wget', '--quiet', '-O', checkpoint_path, url])
+            print(f'  Finish downloading checkpoint.')
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     if 'generator_smooth' in checkpoint:
         generator.load_state_dict(checkpoint['generator_smooth'])

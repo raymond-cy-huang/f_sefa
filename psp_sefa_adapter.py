@@ -67,6 +67,10 @@ class EncoderSefaGenerator(nn.Module):
     def truncation(self, w, trunc_psi=1.0, trunc_layers=None):
         """Repeats one W code into W+; pSp Lenna itself is loaded from .npy."""
         del trunc_psi, trunc_layers
+        if w.ndim == 3:
+            return w
+        if w.ndim == 4:
+            return w[:, 0]
         return w.unsqueeze(1).repeat(1, self.num_layers, 1)
 
     def sefa_weights(self, layers):

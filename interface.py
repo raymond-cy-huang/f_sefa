@@ -71,6 +71,7 @@ def main():
     model_name = st.sidebar.selectbox(
         'Model to Interpret',
         [E4E_MODEL_NAME, PSP_MODEL_NAME,
+         'stylegan_ffhq_2019',
          'stylegan_animeface512', 'stylegan_car512', 'stylegan_cat256',
          'pggan_celebahq1024'])
 

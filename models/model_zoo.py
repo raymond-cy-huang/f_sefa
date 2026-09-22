@@ -167,6 +167,11 @@ MODEL_ZOO = {
         resolution=1024,
         url='https://mycuhk-my.sharepoint.com/:u:/g/personal/1155082926_link_cuhk_edu_hk/EdfMxgb0hU9BoXwiR3dqYDEBowCSEF1IcsW3n4kwfoZ9OQ?e=VwIV58&download=1',
     ),
+    'stylegan_ffhq_2019': dict(
+        gan_type='stylegan',
+        resolution=1024,
+        url='local checkpoint: checkpoints/stylegan_ffhq_2019.pkl',
+    ),
     'stylegan_celebahq1024': dict(
         gan_type='stylegan',
         resolution=1024,
