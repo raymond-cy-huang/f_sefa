@@ -1,0 +1,4 @@
+attempt,accepted,acceptance_mode,accepted_steps,iterations,random_search_objective,ro_search_objective,search_objective_improvement,runtime_seconds
+1,False,riemannian_optimization,0,0,-1.032111257314682,-1.0321527421474457,-4.1484832763671875e-05,0.9805204460026289
+2,False,riemannian_optimization,0,0,-2.2955785989761353,-2.29563307762146,-5.447864532470703e-05,0.9363521649975155
+3,True,riemannian_optimization,1,1,-2.969374179840088,-2.2780333906412125,0.6913407891988754,1.87962931400034

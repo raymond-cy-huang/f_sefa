@@ -16,11 +16,14 @@ def latent_errors(original, reconstructed, eps=1e-12):
     diff = original - reconstructed
     l2 = float(np.linalg.norm(diff.reshape(-1), ord=2))
     denom = max(float(np.linalg.norm(original.reshape(-1), ord=2)), eps)
+    recon_denom = max(float(np.linalg.norm(reconstructed.reshape(-1), ord=2)), eps)
+    cosine = float(np.dot(original.reshape(-1), reconstructed.reshape(-1)) / (denom * recon_denom))
     return {
         "l1_error": float(np.linalg.norm(diff.reshape(-1), ord=1)),
         "l2_error": l2,
         "relative_l2_error": l2 / denom,
         "max_abs_error": float(np.max(np.abs(diff))),
+        "cosine_similarity": cosine,
     }
 
 

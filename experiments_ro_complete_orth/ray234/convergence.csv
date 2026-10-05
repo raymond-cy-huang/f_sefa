@@ -1,0 +1,2 @@
+iteration,objective,effect,curvature,euclidean_gradient_norm,riemannian_gradient_norm,tangent_error,orthogonality_l2,orthogonality_max_abs,hilbert_norm_squared,hilbert_norm_error,accepted_step_size,line_search_evaluations,stop_reason
+0,-3.7562564611434937,0.8375695943832397,45.93825912475586,53.04886245727539,51.68964385986328,6.556510925292969e-07,5.023550614876767e-08,8.858746066461691e-09,0.9999999988783976,1.1216023665383545e-09,0.0,6,line_search_failed
