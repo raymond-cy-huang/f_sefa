@@ -17,10 +17,10 @@ RQ1/RQ2 test structured GAN variation and held-out generalization. They do not b
 ## Paired held-out result
 
 - Restarts: `1`
-- Mean RO - Random test objective: `9.505219e-01`
-- Bootstrap 95% interval: `[9.505219e-01, 9.505219e-01]`
+- Mean RO - Random test objective: `9.559204e-01`
+- Bootstrap 95% interval: `[9.559204e-01, 9.559204e-01]`
 - Fraction of restarts with positive held-out improvement: `1.000`
-- Total runtime (seconds): `11.73`
+- Total runtime (seconds): `10.95`
 
 ## Configuration
 
