@@ -1,0 +1,4 @@
+seed_index,alpha,direction_cosine_absolute,iterations,stopping_criterion
+0,0.0,1.0,18,"Terminated - min grad norm reached after 18 iterations, 0.01 seconds."
+0,0.5,1.0,18,"Terminated - min grad norm reached after 18 iterations, 0.01 seconds."
+0,1.0,1.0,20,"Terminated - min grad norm reached after 20 iterations, 0.01 seconds."

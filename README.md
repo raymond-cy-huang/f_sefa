@@ -12,6 +12,35 @@
 [[Demo](https://www.youtube.com/watch?v=OFHW2WbXXIQ)]
 [[Colab](https://colab.research.google.com/github/genforce/sefa/blob/master/docs/SeFa.ipynb)]
 
+## Environment
+
+All experiments in this repository should be run in the `gdsa` Conda
+environment, which is cloned from the existing `pixel2style2pixel`
+environment:
+
+```bash
+conda activate gdsa
+```
+
+To run a command without activating the environment first:
+
+```bash
+conda run -n gdsa python <script.py>
+```
+
+## GDSA Experiments
+
+All new GDSA experiments must be placed under `experiments_gdsa/`. Each
+experiment uses a numbered directory so that its implementation, configuration,
+outputs, and findings remain isolated from the legacy experiments in this
+repository.
+
+The first experiment is located at:
+
+```text
+experiments_gdsa/01_sinh_none_linear_mapping_inversion/
+```
+
 In this repository, we propose a *closed-form* approach, termed as **SeFa**, for *unsupervised* latent semantic factorization in GANs. With this algorithm, we are able to discover versatile semantics from different GAN models trained on various datasets. Most importantly, the proposed method does *not* rely on pre-trained semantic predictors and has an extremely *fast* implementation (*i.e.*, less than 1 second to interpret a model). Below show some interesting results on anime faces, cats, and cars.
 
 **NOTE:** The following semantics are identified in a completely *unsupervised* manner, and post-annotated for reference.
